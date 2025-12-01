@@ -1,0 +1,64 @@
+# Environment and secrets
+.env
+*.key
+*.pem
+
+# Model files (too large for git)
+*.hef
+*.tflite
+*.onnx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+*.log
+hailort.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# Camera snapshots (temporary data)
+camera_snapshots/
+*.jpg
+*.png
+*.mp4
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hailo examples (external repo)
+hailo-rpi5-examples/
+
+# Delete folder
+delete/
