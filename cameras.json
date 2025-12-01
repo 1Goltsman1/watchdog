@@ -1,0 +1,13 @@
+{
+  "cameras": [
+    {
+      "id": "camera1",
+      "name": "Bike Camera",
+      "enabled": true,
+      "rtsp_url": "rtsp://Dair:A123456a%21@80.178.150.137:554/unicast/c1/s1/live",
+      "zone_polygon": [[0.514, 0.876], [0.562, 0.788], [0.441, 0.689], [0.382, 0.705], [0.357, 0.722], [0.344, 0.738], [0.339, 0.746], [0.5, 0.885]],
+      "alert_time_threshold": 25,
+      "call_time_threshold": 45
+    }
+  ]
+}
