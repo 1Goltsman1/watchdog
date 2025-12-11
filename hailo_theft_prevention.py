@@ -23,11 +23,14 @@ from alert_service import send_push_notification, make_phone_call, send_telegram
 # Import web dashboard
 import threading
 try:
-    from web_dashboard import app, update_frame, update_stats
+    from web_dashboard import app, update_frame, update_stats, is_monitoring_enabled
     WEB_DASHBOARD_ENABLED = True
 except ImportError:
     print("[WARNING] Flask not installed - web dashboard disabled")
     WEB_DASHBOARD_ENABLED = False
+    # Dummy function if web dashboard is not available
+    def is_monitoring_enabled():
+        return True
 
 # --- CONFIGURATION ---
 # Get script directory for absolute paths
@@ -541,8 +544,11 @@ def main():
                     # Enhance brightness/contrast for dark environment (BEFORE detection)
                     frame = cv2.convertScaleAbs(frame, alpha=CONTRAST_BOOST, beta=BRIGHTNESS_BOOST)
 
-                    # Skip frames to reduce processing load
-                    if frame_count % PROCESS_EVERY_N_FRAMES != 0:
+                    # Check if monitoring is enabled
+                    monitoring_active = is_monitoring_enabled()
+
+                    # Skip frames to reduce processing load or if monitoring is disabled
+                    if frame_count % PROCESS_EVERY_N_FRAMES != 0 or not monitoring_active:
                         # Still show frame even if not processing
                         if not HEADLESS_MODE:
                             try:
@@ -552,6 +558,18 @@ def main():
                                     break
                             except:
                                 pass
+
+                        # Update web dashboard even when monitoring is disabled
+                        if WEB_DASHBOARD_ENABLED and not monitoring_active:
+                            uptime = int(time.time() - start_time)
+                            update_frame('camera1', frame)
+                            update_stats(
+                                active_tracking=0,
+                                alerts_sent=shutdown_stats['total_alerts'],
+                                fps=0,
+                                uptime=uptime,
+                                status="System Paused"
+                            )
                         continue
 
                     # Prepare input: YOLOX-S expects 640x640 UINT8

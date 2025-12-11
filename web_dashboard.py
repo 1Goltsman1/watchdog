@@ -4,7 +4,7 @@ Web Dashboard for Bike Monitor
 Provides live video feed and system status via Flask web interface
 """
 
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, render_template, Response, jsonify, request
 import cv2
 import threading
 import time
@@ -31,7 +31,8 @@ global_stats = {
     'cpu_temp': 0.0,
     'fps': 0.0,
     'uptime': 0,
-    'status': 'Starting...'
+    'status': 'Starting...',
+    'monitoring_enabled': True  # System monitoring state
 }
 global_stats_lock = threading.Lock()
 
@@ -77,6 +78,24 @@ def update_global_stats(fps=None, uptime=None, status=None):
         if status is not None:
             global_stats['status'] = status
         global_stats['cpu_temp'] = get_cpu_temperature()
+
+
+def is_monitoring_enabled():
+    """Check if monitoring is enabled"""
+    with global_stats_lock:
+        return global_stats.get('monitoring_enabled', True)
+
+
+def set_monitoring_enabled(enabled):
+    """Enable or disable monitoring"""
+    global global_stats
+    with global_stats_lock:
+        global_stats['monitoring_enabled'] = enabled
+        if enabled:
+            global_stats['status'] = 'System Active - Monitoring'
+        else:
+            global_stats['status'] = 'System Paused'
+        return global_stats['monitoring_enabled']
 
 
 # Backward compatibility with single-camera code
@@ -146,8 +165,28 @@ def status():
             'fps': global_stats['fps'],
             'uptime': global_stats['uptime'],
             'status': global_stats['status'],
+            'monitoring_enabled': global_stats.get('monitoring_enabled', True),
             'cameras': camera_stats
         })
+
+
+@app.route('/toggle_monitoring', methods=['POST'])
+def toggle_monitoring():
+    """Toggle monitoring on/off"""
+    try:
+        data = request.get_json()
+        enabled = data.get('enabled', True)
+        new_state = set_monitoring_enabled(enabled)
+        return jsonify({
+            'success': True,
+            'monitoring_enabled': new_state,
+            'status': global_stats['status']
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 if __name__ == '__main__':
