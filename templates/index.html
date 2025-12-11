@@ -113,11 +113,6 @@
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         }
 
-        .stat-icon {
-            font-size: 1.5em;
-            margin-right: 10px;
-        }
-
         .status-indicator {
             display: inline-block;
             width: 12px;
@@ -167,6 +162,45 @@
             margin: 10px 0;
         }
 
+        .toggle-container {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .toggle-btn {
+            padding: 15px 40px;
+            font-size: 1.1em;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .toggle-btn.active {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: #1e3c72;
+        }
+
+        .toggle-btn.active:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(67, 233, 123, 0.4);
+        }
+
+        .toggle-btn.inactive {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .toggle-btn.inactive:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.4);
+        }
+
         footer {
             text-align: center;
             margin-top: 30px;
@@ -178,41 +212,41 @@
 <body>
     <div class="container">
         <header>
-            <h1>🚴 Bike Monitor Dashboard</h1>
-            <p class="subtitle">AI-Powered Theft Prevention System</p>
+            <h1>Watchdog Security Monitor</h1>
+            <p class="subtitle">AI-Powered Security Monitoring System</p>
         </header>
 
         <div class="dashboard">
             <div class="video-container">
-                <h2>📹 Live Camera Feed</h2>
+                <h2>Live Camera Feed</h2>
                 <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Live Video Feed">
             </div>
 
             <div class="stats-container">
                 <div class="stat-card tracking-card">
                     <div class="stat-label">
-                        <span class="stat-icon">👥</span> People Detected
+                        People Detected
                     </div>
                     <div class="stat-value" id="active-tracking">0</div>
                 </div>
 
                 <div class="stat-card alert-card">
                     <div class="stat-label">
-                        <span class="stat-icon">🚨</span> Alerts Sent
+                        Alerts Sent
                     </div>
                     <div class="stat-value" id="alerts-sent">0</div>
                 </div>
 
                 <div class="stat-card fps-card">
                     <div class="stat-label">
-                        <span class="stat-icon">⚡</span> FPS
+                        FPS
                     </div>
                     <div class="stat-value" id="fps">0</div>
                 </div>
 
                 <div class="stat-card temp-card">
                     <div class="stat-label">
-                        <span class="stat-icon">🌡️</span> CPU Temperature
+                        CPU Temperature
                     </div>
                     <div class="stat-value" id="cpu-temp">0°C</div>
                 </div>
@@ -225,7 +259,12 @@
                 <span id="system-status">System Active</span>
             </h3>
             <div class="uptime">
-                ⏱ Uptime: <strong id="uptime">0s</strong>
+                Uptime: <strong id="uptime">0s</strong>
+            </div>
+            <div class="toggle-container">
+                <button id="toggle-btn" class="toggle-btn active" onclick="toggleMonitoring()">
+                    Turn Off Monitoring
+                </button>
             </div>
         </div>
 
@@ -246,6 +285,20 @@
                     document.getElementById('fps').textContent = data.fps;
                     document.getElementById('system-status').textContent = data.status;
 
+                    // Update toggle button state
+                    const toggleBtn = document.getElementById('toggle-btn');
+                    const monitoringEnabled = data.monitoring_enabled;
+
+                    if (monitoringEnabled) {
+                        toggleBtn.classList.remove('inactive');
+                        toggleBtn.classList.add('active');
+                        toggleBtn.textContent = 'Turn Off Monitoring';
+                    } else {
+                        toggleBtn.classList.remove('active');
+                        toggleBtn.classList.add('inactive');
+                        toggleBtn.textContent = 'Turn On Monitoring';
+                    }
+
                     // Format uptime
                     const uptime = data.uptime;
                     const hours = Math.floor(uptime / 3600);
@@ -263,6 +316,43 @@
                     console.error('Error fetching status:', error);
                     document.getElementById('system-status').textContent = 'Connection Error';
                 });
+        }
+
+        // Toggle monitoring on/off
+        function toggleMonitoring() {
+            const toggleBtn = document.getElementById('toggle-btn');
+            const currentState = toggleBtn.classList.contains('active');
+            const newState = !currentState;
+
+            // Disable button while processing
+            toggleBtn.disabled = true;
+            toggleBtn.textContent = 'Processing...';
+
+            fetch('/toggle_monitoring', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ enabled: newState })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Monitoring toggled successfully:', data);
+                    // Update will happen in next status poll
+                    updateStatus();
+                } else {
+                    console.error('Failed to toggle monitoring:', data.error);
+                    alert('Failed to toggle monitoring: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error toggling monitoring:', error);
+                alert('Error toggling monitoring. Please try again.');
+            })
+            .finally(() => {
+                toggleBtn.disabled = false;
+            });
         }
 
         // Initial update
