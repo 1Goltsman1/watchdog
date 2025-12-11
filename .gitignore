@@ -60,5 +60,49 @@ Thumbs.db
 # Hailo examples (external repo)
 hailo-rpi5-examples/
 
-# Delete folder
+# Delete folder and old backups
 delete/
+
+# Analysis and research documents (not needed for production)
+AWS_*.md
+COST_*.md
+ROADMAP_*.md
+TASK_*.md
+HAILO_EXAMPLES_ANALYSIS.md
+MODEL_COMPARISON.md
+QA_SYSTEM_REPORT.md
+QUICK_WINS.md
+RESEARCH_DOCUMENTATION.md
+VERSION_CONTROL.md
+*_ANALYSIS.md
+
+# Deployment guides for other platforms (local only)
+aws_setup/
+pc_setup/
+DEPLOYMENT_GUIDE.md
+MULTI_TENANT_DEPLOYMENT.md
+PC_OPTIMIZATION_GUIDE.md
+Dockerfile
+.dockerignore
+
+# Test and verification files
+test_*.py
+verify_*.py
+*_test.py
+
+# Temporary files
+30 sec text result
+*.tmp
+
+# Multi-camera example (keep cameras.json)
+cameras_multi_example.json
+
+# Telegram zone bot (separate feature)
+telegram_zone_bot.py
+telegram-zone-bot.service
+
+# Watchdog service utility (optional)
+watchdog.py
+
+# Additional setup guides (consolidated into docs)
+MULTI_CAMERA_SETUP.md
