@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from collections import defaultdict
 import numpy as np
+import pytz
 from hailo_platform import (HEF, ConfigureParams, FormatType, HailoStreamInterface,
                              InferVStreams, InputVStreamParams, OutputVStreamParams, VDevice)
 
@@ -36,8 +37,8 @@ except ImportError:
 # Get script directory for absolute paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Uniview NVR path: /unicast/c1/s1/live (Channel 1, Substream - better for Pi decoding)
-RTSP_URL = "rtsp://Dair:A123456a%21@80.178.150.137:554/unicast/c1/s1/live"
+# Camera RTSP URL (from environment variable for security)
+RTSP_URL = os.getenv("RTSP_URL", "rtsp://username:password@192.168.1.100:554/stream")
 HEF_MODEL_PATH = os.path.join(SCRIPT_DIR, "yolox_s_leaky_hailo8.hef")  # YOLOX-S for Hailo-8 (Apache 2.0)
 CONFIDENCE_THRESHOLD = 0.45  # Lowered for dark environment (was 0.5)
 PROCESS_EVERY_N_FRAMES = 3  # Process every 3rd frame to reduce load
@@ -66,15 +67,63 @@ os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
 # Bike-specific detection zone (restored)
 ZONE_POLYGON = np.array([[0.237, 0.861], [0.412, 0.628], [0.597, 0.729], [0.596, 0.849], [0.550, 0.979], [0.500, 0.970]])
 
-# Alert Thresholds (seconds)
-ALERT_TIME_THRESHOLD = 20  # Telegram alert after 20 seconds
-CALL_TIME_THRESHOLD = 40   # Phone call after 40 seconds
+# Alert Thresholds (seconds) - TIME-BASED CONFIGURATION
+# Israel timezone
+ISRAEL_TZ = pytz.timezone('Asia/Jerusalem')
+
+# Daytime configuration (8am - 11pm Israel time)
+DAYTIME_START_HOUR = 8  # 8am
+DAYTIME_END_HOUR = 23   # 11pm (23:00)
+
+# Daytime alert thresholds (8am - 11pm)
+DAYTIME_ALERT_1 = 10   # First Telegram alert at 10 seconds
+DAYTIME_ALERT_2 = 30   # Second Telegram alert at 30 seconds
+DAYTIME_ALERT_3 = 60   # Third Telegram alert at 60 seconds
+DAYTIME_CALL_ENABLED = False  # No phone calls during daytime
+
+# Nighttime alert thresholds (11pm - 8am)
+NIGHTTIME_ALERT_1 = 3   # First Telegram alert at 3 seconds
+NIGHTTIME_CALL = 13     # Phone call at 13 seconds (3 + 10)
+NIGHTTIME_CALL_ENABLED = True  # Phone calls enabled at night
+
 CALL_COOLDOWN = 25  # Seconds between calls
+
+def is_daytime():
+    """Check if current time is during daytime hours (8am-11pm Israel time)"""
+    israel_time = datetime.now(ISRAEL_TZ)
+    current_hour = israel_time.hour
+    return DAYTIME_START_HOUR <= current_hour < DAYTIME_END_HOUR
+
+def get_alert_thresholds():
+    """Get alert thresholds based on current time (Israel timezone)"""
+    if is_daytime():
+        return {
+            'alert_1': DAYTIME_ALERT_1,
+            'alert_2': DAYTIME_ALERT_2,
+            'alert_3': DAYTIME_ALERT_3,
+            'call_threshold': None,  # No calls during daytime
+            'call_enabled': DAYTIME_CALL_ENABLED,
+            'period': 'DAYTIME'
+        }
+    else:
+        return {
+            'alert_1': NIGHTTIME_ALERT_1,
+            'alert_2': None,  # Only one telegram alert before call
+            'alert_3': None,
+            'call_threshold': NIGHTTIME_CALL,
+            'call_enabled': NIGHTTIME_CALL_ENABLED,
+            'period': 'NIGHTTIME'
+        }
 
 # --- STATE TRACKING ---
 zone_entry_times = {}  # tracker_id -> first entry timestamp
 last_seen_times = {}   # tracker_id -> last detection timestamp
-alert_state = defaultdict(lambda: {"alert_sent": False, "call_sent": False})
+alert_state = defaultdict(lambda: {
+    "alert_1_sent": False,
+    "alert_2_sent": False,
+    "alert_3_sent": False,
+    "call_sent": False
+})
 
 # Grace period: keep person in zone for 5s after last detection (prevents flicker)
 GRACE_PERIOD = 5.0  # seconds
@@ -487,14 +536,32 @@ def main():
             print(f"Configuration: Threshold={CONFIDENCE_THRESHOLD}, Frame skip={PROCESS_EVERY_N_FRAMES}")
 
             # Send startup alert to Telegram
+            israel_time = datetime.now(ISRAEL_TZ)
+            current_thresholds = get_alert_thresholds()
+            period = current_thresholds['period']
+
+            if period == 'DAYTIME':
+                alert_config = (
+                    f"⏰ Mode: DAYTIME (8am-11pm)\n"
+                    f"📱 Alerts: {DAYTIME_ALERT_1}s, {DAYTIME_ALERT_2}s, {DAYTIME_ALERT_3}s\n"
+                    f"📞 Calls: Disabled"
+                )
+            else:
+                alert_config = (
+                    f"🌙 Mode: NIGHTTIME (11pm-8am)\n"
+                    f"📱 Alert: {NIGHTTIME_ALERT_1}s\n"
+                    f"📞 Call: {NIGHTTIME_CALL}s"
+                )
+
             startup_message = (
                 f"✅ <b>Bike Monitor Armed</b>\n\n"
                 f"🟢 System is now monitoring your bike\n"
                 f"📹 Camera: Connected\n"
                 f"🤖 AI: {hailo_model}\n"
                 f"⚙️ Confidence: {CONFIDENCE_THRESHOLD}\n"
-                f"🔧 Model: SSD MobileNet V1 (300x300, UINT8)\n"
-                f"🕒 Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"🔧 Model: SSD MobileNet V1 (300x300, UINT8)\n\n"
+                f"{alert_config}\n\n"
+                f"🕒 Started: {israel_time.strftime('%Y-%m-%d %H:%M:%S')} (Israel)"
             )
             send_telegram_alert(startup_message)
 
@@ -640,57 +707,110 @@ def main():
                                 print(f"✓ Person {tracker_id} entered the Bike Zone.")
                             
                             duration = current_time - zone_entry_times[tracker_id]
-                            
-                            # Check Thresholds
-                            if duration > ALERT_TIME_THRESHOLD and not alert_state[tracker_id]["alert_sent"]:
+
+                            # Get current time-based thresholds (Israel timezone)
+                            thresholds = get_alert_thresholds()
+                            israel_time = datetime.now(ISRAEL_TZ)
+                            time_period = thresholds['period']
+
+                            # Check Alert 1
+                            if thresholds['alert_1'] and duration > thresholds['alert_1'] and not alert_state[tracker_id]["alert_1_sent"]:
                                 # Save current frame for Telegram alert
-                                alert_image_path = "/tmp/bike_alert.jpg"
+                                alert_image_path = "/tmp/bike_alert_1.jpg"
                                 try:
                                     cv2.imwrite(alert_image_path, frame)
                                 except Exception as e:
-                                    print(f"[WARNING] Failed to save alert image: {e}")
+                                    print(f"[WARNING] Failed to save alert 1 image: {e}")
                                     alert_image_path = None
-
-                                # Send alerts
-                                send_push_notification(tracker_id, duration)
 
                                 # Send Telegram alert with image
                                 telegram_message = (
-                                    f"🚨 <b>Bike Alert!</b>\n\n"
+                                    f"🚨 <b>Bike Alert #{1}</b> [{time_period}]\n\n"
                                     f"👤 Person ID: {tracker_id}\n"
                                     f"⏱ Duration in zone: {duration:.1f}s\n"
                                     f"📍 Status: In bike zone\n"
-                                    f"🕒 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                                    f"🕒 Time: {israel_time.strftime('%Y-%m-%d %H:%M:%S')} (Israel)"
                                 )
                                 send_telegram_alert(telegram_message, alert_image_path)
 
-                                alert_state[tracker_id]["alert_sent"] = True
+                                alert_state[tracker_id]["alert_1_sent"] = True
                                 shutdown_stats['total_alerts'] += 1
+                                print(f"[ALERT] Sent Alert #1 for ID {tracker_id} at {duration:.1f}s ({time_period})")
 
-                            if duration > CALL_TIME_THRESHOLD and not alert_state[tracker_id]["call_sent"]:
-                                # Save current frame for second Telegram alert
-                                alert_image_path_45s = "/tmp/bike_alert_45s.jpg"
+                            # Check Alert 2 (daytime only)
+                            if thresholds['alert_2'] and duration > thresholds['alert_2'] and not alert_state[tracker_id]["alert_2_sent"]:
+                                # Save current frame for Telegram alert
+                                alert_image_path = "/tmp/bike_alert_2.jpg"
                                 try:
-                                    cv2.imwrite(alert_image_path_45s, frame)
+                                    cv2.imwrite(alert_image_path, frame)
                                 except Exception as e:
-                                    print(f"[WARNING] Failed to save 45s alert image: {e}")
-                                    alert_image_path_45s = None
+                                    print(f"[WARNING] Failed to save alert 2 image: {e}")
+                                    alert_image_path = None
+
+                                # Send Telegram alert with image
+                                telegram_message = (
+                                    f"🚨🚨 <b>Bike Alert #{2}</b> [{time_period}]\n\n"
+                                    f"👤 Person ID: {tracker_id}\n"
+                                    f"⏱ Duration in zone: {duration:.1f}s\n"
+                                    f"⚠️ STILL in bike zone!\n"
+                                    f"🕒 Time: {israel_time.strftime('%Y-%m-%d %H:%M:%S')} (Israel)"
+                                )
+                                send_telegram_alert(telegram_message, alert_image_path)
+
+                                alert_state[tracker_id]["alert_2_sent"] = True
+                                shutdown_stats['total_alerts'] += 1
+                                print(f"[ALERT] Sent Alert #2 for ID {tracker_id} at {duration:.1f}s ({time_period})")
+
+                            # Check Alert 3 (daytime only)
+                            if thresholds['alert_3'] and duration > thresholds['alert_3'] and not alert_state[tracker_id]["alert_3_sent"]:
+                                # Save current frame for Telegram alert
+                                alert_image_path = "/tmp/bike_alert_3.jpg"
+                                try:
+                                    cv2.imwrite(alert_image_path, frame)
+                                except Exception as e:
+                                    print(f"[WARNING] Failed to save alert 3 image: {e}")
+                                    alert_image_path = None
+
+                                # Send Telegram alert with image
+                                telegram_message = (
+                                    f"🚨🚨🚨 <b>Bike Alert #{3}</b> [{time_period}]\n\n"
+                                    f"👤 Person ID: {tracker_id}\n"
+                                    f"⏱ Duration in zone: {duration:.1f}s\n"
+                                    f"⚠️⚠️ STILL in bike zone - CHECK NOW!\n"
+                                    f"🕒 Time: {israel_time.strftime('%Y-%m-%d %H:%M:%S')} (Israel)"
+                                )
+                                send_telegram_alert(telegram_message, alert_image_path)
+
+                                alert_state[tracker_id]["alert_3_sent"] = True
+                                shutdown_stats['total_alerts'] += 1
+                                print(f"[ALERT] Sent Alert #3 for ID {tracker_id} at {duration:.1f}s ({time_period})")
+
+                            # Check Phone Call (nighttime only)
+                            if thresholds['call_enabled'] and thresholds['call_threshold'] and duration > thresholds['call_threshold'] and not alert_state[tracker_id]["call_sent"]:
+                                # Save current frame for call alert
+                                alert_image_path_call = "/tmp/bike_alert_call.jpg"
+                                try:
+                                    cv2.imwrite(alert_image_path_call, frame)
+                                except Exception as e:
+                                    print(f"[WARNING] Failed to save call alert image: {e}")
+                                    alert_image_path_call = None
 
                                 # Make phone call
                                 if make_phone_call(tracker_id, duration):
-                                    # Send second Telegram alert with updated photo
+                                    # Send Telegram alert with updated photo
                                     telegram_message_urgent = (
-                                        f"🚨🚨 <b>URGENT: Phone Call Initiated!</b>\n\n"
-                                        f"☎️ Calling you now!\n"
+                                        f"☎️🚨 <b>URGENT: Phone Call Initiated!</b> [{time_period}]\n\n"
+                                        f"📞 Calling you now!\n"
                                         f"👤 Person ID: {tracker_id}\n"
                                         f"⏱ Duration in zone: {duration:.1f}s\n"
                                         f"⚠️ STILL in bike zone - CHECK NOW!\n"
-                                        f"🕒 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                                        f"🕒 Time: {israel_time.strftime('%Y-%m-%d %H:%M:%S')} (Israel)"
                                     )
-                                    send_telegram_alert(telegram_message_urgent, alert_image_path_45s)
+                                    send_telegram_alert(telegram_message_urgent, alert_image_path_call)
 
                                     alert_state[tracker_id]["call_sent"] = True
                                     shutdown_stats['total_alerts'] += 1
+                                    print(f"[ALERT] Phone call initiated for ID {tracker_id} at {duration:.1f}s ({time_period})")
                         
                         # Draw bounding box
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
